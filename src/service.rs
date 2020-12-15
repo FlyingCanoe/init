@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::env;
 use std::ffi::OsStr;
-use std::fs::{File, read_dir};
+use std::fs::{read_dir, File};
 use std::io::Read;
 use std::path::Path;
 
@@ -12,15 +12,15 @@ use redox_users::{AllGroups, AllUsers};
 use serde_derive::Deserialize;
 use toml;
 
-use crate::PathExt;
-use crate::command::Command;
 use self::ServiceState::*;
+use crate::command::Command;
+use crate::PathExt;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ServiceState {
     Offline,
     Online,
-    Failed
+    Failed,
 }
 
 impl ServiceState {
@@ -28,20 +28,22 @@ impl ServiceState {
         match self {
             Offline => false,
             Online => true,
-            Failed => false
+            Failed => false,
         }
     }
 }
 
 impl Default for ServiceState {
-    fn default() -> ServiceState { ServiceState::Offline }
+    fn default() -> ServiceState {
+        ServiceState::Offline
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Method {
     /// The command that is executed when this method is "called".
     pub cmd: Vec<String>,
-    
+
     /// Environment variables to set for the process executed by
     /// this method. Overrides service-level environment variables,
     /// meaning service-level vars are not set.
@@ -49,7 +51,7 @@ pub struct Method {
     /// The current working directory for the process executed
     /// by this method. Overrides service-level cwd.
     pub cwd: Option<String>,
-    
+
     /// Username to run this method's process as. Overrides
     /// service-level username. Must be present in order to use
     /// `group`. Defaults to `root`.
@@ -59,7 +61,7 @@ pub struct Method {
     /// is not, `user`'s primary group id is used. Defaults to
     /// `root`.
     pub group: Option<String>,
-    
+
     /// A process's namespace is the set of schemes which it may
     /// access during it's entire lifetime. This field maps directly
     /// to the Redox kernel functionality. Overrides service-level
@@ -76,54 +78,58 @@ impl Method {
     //TODO: Allow env-var args to be only partially env vars
     // Eg: allow `--target=$MY_VAR`
     fn sub_env(&mut self) {
-        let modified_cmd = self.cmd.drain(..)
-            .map(|arg| if arg.trim().starts_with('$') {
+        let modified_cmd = self
+            .cmd
+            .drain(..)
+            .map(|arg| {
+                if arg.trim().starts_with('$') {
                     let (_, varname) = arg.split_at(1);
                     let val = env::var(&varname).unwrap_or(String::new());
                     trace!("replacing env ${}={}", varname, val);
                     val
                 } else {
                     arg
-                })
+                }
+            })
             .collect();
         self.cmd = modified_cmd;
     }
-    
-    pub fn wait(&self, vars: Option<&HashMap<String, String>>,
+
+    pub fn wait(
+        &self,
+        vars: Option<&HashMap<String, String>>,
         cwd: Option<&String>,
         user: Option<&String>,
         group: Option<&String>,
         namespace: Option<&Vec<String>>,
     ) -> Result<(), Error> {
-        
         let mut cmd = Command::new(self.cmd[0].clone());
-        cmd.args(self.cmd[1..].to_vec())
-            .env_clear();
-        
+        cmd.args(self.cmd[1..].to_vec()).env_clear();
+
         if let Some(vars) = self.vars.as_ref().or(vars) {
             for (var, val) in vars.iter() {
                 cmd.env(var.to_string(), val.to_string());
             }
         }
-        
+
         if let Some(cwd) = self.cwd.as_ref().or(cwd) {
             cmd.cwd(cwd.to_string());
         }
-        
+
         // Any reason to default to `root` instead of
         //   inheriting from init?
         // Tbh rewrite this control flow
         if let Some(user) = self.user.as_ref().or(user) {
             let users = AllUsers::new(false)?;
-            
+
             if let Some(user) = users.get_by_name(user) {
                 cmd.uid(user.uid);
-                
+
                 // Once we know the the user exists, then we can check
                 //   for group stuff.
                 if let Some(group) = self.group.as_ref().or(group) {
                     let groups = AllGroups::new()?;
-                    
+
                     if let Some(group) = groups.get_by_name(group) {
                         cmd.gid(group.gid);
                     } else {
@@ -141,15 +147,14 @@ impl Method {
                 error!("group provided without user, ignoring: '{}'", group);
             }
         }
-        
+
         if let Some(namespace) = self.namespace.as_ref().or(namespace) {
             cmd.ns(namespace.to_vec());
         }
-        
+
         debug!("waiting on process '{}'", cmd);
-        
-        cmd.spawn()?
-            .wait()?;
+
+        cmd.spawn()?.wait()?;
         Ok(())
     }
 }
@@ -159,7 +164,7 @@ pub struct Service {
     /// Deduced from the service configuration file name
     #[serde(skip)]
     pub name: String,
-    
+
     /// A dependency is required in order for this service
     /// to be started.
     /// A dependency is a string that can be either the name
@@ -181,7 +186,7 @@ pub struct Service {
     ///  - stop
     ///  - restart
     pub methods: HashMap<String, Method>,
-    
+
     /// Environment variables used for all methods that are a
     /// part of this service.
     pub vars: Option<HashMap<String, String>>,
@@ -189,12 +194,12 @@ pub struct Service {
     /// a part of this service. This defaults to the root of the
     /// scheme that this service was parsed from.
     pub cwd: Option<String>,
-    
+
     /// Username to run all service methods as
     pub user: Option<String>,
     /// Groupname to run all service methods as
     pub group: Option<String>,
-    
+
     /// The default namespace used for every method on this service.
     /// This is a list of schemes that a process has access to over
     /// its entire lifetime.
@@ -206,20 +211,20 @@ impl Service {
     pub fn from_file(file_path: impl AsRef<Path>) -> Result<Service, Error> {
         let file_path = file_path.as_ref();
         trace!("parsing service file: {:#?}", file_path);
-        
+
         let mut data = String::new();
-        File::open(&file_path)?
-            .read_to_string(&mut data)?;
-        
+        File::open(&file_path)?.read_to_string(&mut data)?;
+
         let mut service = toml::from_str::<Service>(&data)?;
-        
+
         //BUG: Only removes the portion after the last '.'
-        service.name = file_path.file_stem()
+        service.name = file_path
+            .file_stem()
             .ok_or(err_msg("service file path missing filename"))?
             .to_string_lossy() // Redox uses unicode, this should never fail
             .into();
         service.sub_env();
-        
+
         // Assume that the scheme this service came from is the one
         //   that the service should be started in
         if let None = service.cwd {
@@ -229,37 +234,38 @@ impl Service {
         }
         Ok(service)
     }
-    
+
     /// Parse all the toml files in a directory as services
     pub fn from_dir(dir: impl AsRef<Path>) -> Result<Vec<Service>, Error> {
         trace!("parsing services from {:#?}", dir.as_ref());
-        
+
         let mut services = vec![];
-        
+
         for file in read_dir(&dir)? {
             let file_path = match file {
                 Ok(file) => file,
                 Err(err) => {
                     error!("{}", err);
-                    continue
+                    continue;
                 }
-            }.path();
-            
+            }
+            .path();
+
             let is_toml = match file_path.extension() {
                 Some(ext) => ext == OsStr::new("toml"),
-                None => false
+                None => false,
             };
-            
+
             if is_toml {
                 match Service::from_file(file_path) {
                     Ok(service) => services.push(service),
-                    Err(err) => error!("error parsing service file '{:#?}': {}", dir.as_ref(), err)
+                    Err(err) => error!("error parsing service file '{:#?}': {}", dir.as_ref(), err),
                 }
             }
         }
         Ok(services)
     }
-    
+
     /// Substitue all fields which support environment variable
     /// substitution
     fn sub_env(&mut self) {
@@ -267,13 +273,16 @@ impl Service {
             method.sub_env();
         }
     }
-    
+
     /// Spawn the process indicated by a method on this service and `wait()` on it.
     pub fn wait_method(&self, method_name: &String) -> Result<(), Error> {
         match self.methods.get(method_name) {
             Some(method) => {
-                info!("running method '{}' for service '{}'", method_name, self.name);
-                
+                info!(
+                    "running method '{}' for service '{}'",
+                    method_name, self.name
+                );
+
                 method.wait(
                     self.vars.as_ref(),
                     self.cwd.as_ref(),
@@ -282,7 +291,7 @@ impl Service {
                     self.namespace.as_ref(),
                 )?;
                 Ok(())
-            },
+            }
             None => {
                 let msg = format!("service '{}' missing method '{}'", self.name, method_name);
                 Err(err_msg(msg))
