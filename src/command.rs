@@ -7,7 +7,8 @@ use std::os::unix::io::AsRawFd;
 
 use syscall::{
     self,
-    error::Error as SyscallError
+    error::Error as SyscallError,
+    flag::{WaitFlags, CloneFlags}
 };
 
 fn as_io_err(err: SyscallError) -> Error {
@@ -87,7 +88,7 @@ impl Command {
         
         // This is ust copied from the std redox impl
         let pid = unsafe {
-             match syscall::clone(0).map_err(as_io_err)? {
+             match syscall::clone(CloneFlags::empty()).map_err(as_io_err)? {
                  0 => {
                      let _err = self.do_exec(bin);
                      /*let bytes = [
@@ -160,7 +161,7 @@ impl Command {
         args.push([self.bin.as_ptr() as usize, self.bin.len()]);
         args.extend(self.args.iter().map(|arg| [arg.as_ptr() as usize, arg.len()]));
         
-        if let Err(err) = syscall::fexec(bin.as_raw_fd(), &args, &vars) {
+        if let Err(err) = syscall::fexec(bin.as_raw_fd() as usize, &args, &vars) {
             err
         } else {
             panic!("return from exec without err");
@@ -205,7 +206,7 @@ impl Process {
             Ok(status)
         } else {
             let mut status = 0;
-            syscall::waitpid(self.pid, &mut status, 0)
+            syscall::waitpid(self.pid, &mut status, WaitFlags::empty())
                 .map_err(as_io_err)?;
             self.status = Some(status);
             Ok(status)
