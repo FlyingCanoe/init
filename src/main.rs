@@ -5,6 +5,7 @@
 mod command;
 mod dep_graph;
 mod legacy;
+mod scheme;
 mod service;
 mod service_tree;
 
@@ -17,7 +18,7 @@ use std::time::Instant;
 
 use colored::{ColoredString, Colorize};
 use fern::Dispatch;
-use log::{error, Level, LevelFilter};
+use log::{error, info, Level, LevelFilter};
 use syscall::flag::{CloneFlags, WaitFlags, O_RDONLY, O_WRONLY};
 
 use crate::service::Service;

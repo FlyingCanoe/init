@@ -3,12 +3,13 @@ use std::sync::RwLock;
 
 use chashmap::CHashMap;
 use failure::{err_msg, Error};
+use fnv::FnvBuildHasher;
 use generational_arena::Index;
 use log::{error, warn};
 //use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::dep_graph::DepGraph;
 use crate::service::{Service, ServiceState};
+use crate::{dep_graph::DepGraph, service};
 
 /// Main data structure for init, containing the main interface
 /// for dealing with services.
@@ -21,17 +22,17 @@ pub struct ServiceGraph {
     ///   service index that provides that name.
     // Must be sorta global so that dependencies across `push_services`
     //   boundaries link up correctly.
-    redirect_map: CHashMap<String, Index>,
+    redirect_map: CHashMap<String, Index, FnvBuildHasher>,
 
-    state_map: CHashMap<Index, ServiceState>,
+    state_map: CHashMap<Index, ServiceState, FnvBuildHasher>,
 }
 
 impl ServiceGraph {
     pub fn new() -> ServiceGraph {
         ServiceGraph {
             graph: RwLock::new(DepGraph::new()),
-            redirect_map: CHashMap::new(),
-            state_map: CHashMap::new(),
+            redirect_map: CHashMap::with_hasher(FnvBuildHasher::default()),
+            state_map: CHashMap::with_hasher(FnvBuildHasher::default()),
         }
     }
 
@@ -133,6 +134,18 @@ impl ServiceGraph {
                 self.start_service_with_graph(&graph, *index)
                     .unwrap_or_else(|err| error!("error starting service: {}", err));
             });
+        }
+    }
+
+    pub fn get_service_by_name(&self, name: &str) -> Option<Service> {
+        if let Some(service) = self.redirect_map.get(name) {
+            self.graph
+                .read()
+                .expect("init: service graph is poisoned")
+                .get(*service)
+                .cloned()
+        } else {
+            None
         }
     }
 }

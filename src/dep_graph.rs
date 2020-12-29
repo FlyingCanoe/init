@@ -1,17 +1,20 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
+use std::fmt::Debug;
 
+use fnv::FnvBuildHasher;
 use generational_arena::{Arena, Index};
 
 /// A container struct that allows for a
 /// nice abstraction of a dependency graph
-struct Node<T> {
+#[derive(Debug)]
+struct Node<T: Debug> {
     inner: T,
     dependencies: Vec<Index>,
 }
 
-impl<T> Node<T> {
+impl<T: Debug> Node<T> {
     fn new(inner: T) -> Node<T> {
         Node {
             inner,
@@ -34,11 +37,12 @@ impl<T> Node<T> {
 
 /// A sorta thin wrapper over a Generational arena that includes
 /// dependency relationships between nodes and some solvers.
-pub struct DepGraph<T> {
+#[derive(Debug)]
+pub struct DepGraph<T: Debug> {
     graph: Arena<Node<T>>,
 }
 
-impl<T> DepGraph<T> {
+impl<T: Debug> DepGraph<T> {
     pub fn new() -> DepGraph<T> {
         DepGraph {
             graph: Arena::new(),
@@ -104,7 +108,7 @@ impl<T> DepGraph<T> {
     pub fn linear_resolve(&self) -> Vec<Index> {
         let arena_len = self.graph.len();
         let mut resolved = Vec::with_capacity(arena_len);
-        let mut seen = HashSet::with_capacity(arena_len);
+        let mut seen = HashSet::with_capacity_and_hasher(arena_len, FnvBuildHasher::default());
 
         while resolved.len() < arena_len {
             for (index, node) in self.graph.iter() {
@@ -137,7 +141,7 @@ impl<T> DepGraph<T> {
         let arena_len = self.graph.len();
         let mut groups = vec![vec![]];
         let mut group_count = 0;
-        let mut seen = HashSet::with_capacity(arena_len);
+        let mut seen = HashSet::with_capacity_and_hasher(arena_len, FnvBuildHasher::default());
 
         while seen.len() < arena_len {
             for (index, node) in self.graph.iter() {

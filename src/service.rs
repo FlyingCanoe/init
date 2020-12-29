@@ -1,3 +1,4 @@
+use fnv::FnvBuildHasher;
 use std::collections::HashMap;
 use std::default::Default;
 use std::env;
@@ -18,6 +19,7 @@ use crate::PathExt;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ServiceState {
+    Starting,
     Offline,
     Online,
     Failed,
@@ -26,6 +28,7 @@ pub enum ServiceState {
 impl ServiceState {
     pub fn is_online(&self) -> bool {
         match self {
+            Starting => false,
             Offline => false,
             Online => true,
             Failed => false,
@@ -39,7 +42,7 @@ impl Default for ServiceState {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Method {
     /// The command that is executed when this method is "called".
     pub cmd: Vec<String>,
@@ -47,7 +50,7 @@ pub struct Method {
     /// Environment variables to set for the process executed by
     /// this method. Overrides service-level environment variables,
     /// meaning service-level vars are not set.
-    pub vars: Option<HashMap<String, String>>,
+    pub vars: Option<HashMap<String, String, FnvBuildHasher>>,
     /// The current working directory for the process executed
     /// by this method. Overrides service-level cwd.
     pub cwd: Option<String>,
@@ -97,7 +100,7 @@ impl Method {
 
     pub fn wait(
         &self,
-        vars: Option<&HashMap<String, String>>,
+        vars: Option<&HashMap<String, String, FnvBuildHasher>>,
         cwd: Option<&String>,
         user: Option<&String>,
         group: Option<&String>,
@@ -159,7 +162,7 @@ impl Method {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Service {
     /// Deduced from the service configuration file name
     #[serde(skip)]
@@ -185,11 +188,11 @@ pub struct Service {
     /// overridden in a service configuration file:
     ///  - stop
     ///  - restart
-    pub methods: HashMap<String, Method>,
+    pub methods: HashMap<String, Method, FnvBuildHasher>,
 
     /// Environment variables used for all methods that are a
     /// part of this service.
-    pub vars: Option<HashMap<String, String>>,
+    pub vars: Option<HashMap<String, String, FnvBuildHasher>>,
     /// The current working directory for all methods that are
     /// a part of this service. This defaults to the root of the
     /// scheme that this service was parsed from.

@@ -11,6 +11,9 @@ use syscall::{
     flag::{CloneFlags, WaitFlags},
 };
 
+use fnv::FnvBuildHasher;
+use log::info;
+
 fn as_io_err(err: SyscallError) -> Error {
     Error::from_raw_os_error(err.errno)
 }
@@ -22,7 +25,7 @@ fn as_io_err(err: SyscallError) -> Error {
 pub struct Command {
     bin: String,
     args: Vec<String>,
-    env: HashMap<String, String>,
+    env: HashMap<String, String, FnvBuildHasher>,
     clear_env: bool,
 
     cwd: Option<String>,
@@ -36,7 +39,7 @@ impl Command {
         Command {
             bin,
             args: vec![],
-            env: HashMap::new(),
+            env: HashMap::with_hasher(FnvBuildHasher::default()),
             clear_env: false,
 
             cwd: None,
@@ -90,7 +93,7 @@ impl Command {
         let pid = unsafe {
             match syscall::clone(CloneFlags::empty()).map_err(as_io_err)? {
                 0 => {
-                    let _err = self.do_exec(bin);
+                    let _err = dbg!(self.do_exec(bin));
                     /*let bytes = [
                         (err.errno >> 24) as u8,
                         (err.errno >> 16) as u8,
@@ -123,7 +126,7 @@ impl Command {
             ($err:expr) => {
                 match $err {
                     Ok(val) => val,
-                    Err(e) => return e,
+                    Err(e) => return dbg!(e),
                 }
             };
         }
